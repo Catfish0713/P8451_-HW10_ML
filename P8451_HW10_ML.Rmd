@@ -1,0 +1,208 @@
+---
+title: "P8451_HW10_ML"
+author: "Ruixi Li"
+date: "2024-03-26"
+output: html_document
+---
+
+```{r library, include=FALSE}
+library(tidyverse)
+library(caret)
+library(rpart.plot)
+library(vcd)
+library(reshape2)
+
+```
+
+# Research Question
+
+My research question is to generate a hypothesis of which factors among a wide range of prenatal lifestyles and chemical exposures affect birth outcome(measured by birthweight) using data-driven  methods. (Although I propose my research question after conducting EDA, I would put my research question on the top)
+
+# Load .Rdata file and Data Preparation
+
+```{r data preparation, echo=FALSE}
+# Load data using path of where file is stored
+load("exposome.RData")
+
+# I am planning on exploring the effect of prenatal exposome towards babies' birth weight. So I just removed all postnatal exposure.
+
+codebook|> group_by(period) |> count()
+pre = codebook |> filter(period == "Pregnancy") 
+name = rownames(pre)
+pre_exp = exposome |> select(ID,any_of(name))
+
+#Strip off ID Variable
+studydata$ID<-NULL
+
+# summary statistics for all variables
+skimr::skim(studydata)# no missing 
+
+# no duplicate
+studydata <- unique(studydata) # num of obs not changed, no duplicate
+
+# merge three datasets together
+studydata = merge(pre_exp,phenotype,by="ID") |> merge(covariates, by="ID")
+
+```
+
+* There's no missing and duplicate in this dataset. All variables were correctly classified as numeric or factor.In the current analysis we included 87 environmental exposure variables 13 covariates for the pregnancy period and 6 phenotypes were kept although I will only use birthweight(e3_bw) as my outcome. 
+
+# Data Exploration
+
+## Covariates
+
+
+
+## Exposome(pre exp)
+## categorical variables
+
+```{r cate, warning=FALSE, message=FALSE}
+cate = studydata |> select(where(is.factor))
+frequency_tables <- cate %>% map(~ as.data.frame(table(.x), .id = "Variable"))
+frequency_tables |>knitr::kable()
+
+## Correlations
+### Function to calculate Cramér's V
+cramers_v <- function(x, y) {
+  tbl <- table(x, y)
+  chi2 <- chisq.test(tbl, correct = FALSE)$statistic
+  n <- sum(tbl)
+  phi2 <- chi2 / n
+  r <- nrow(tbl) - 1
+  k <- ncol(tbl) - 1
+  min_rk <- min(r, k)
+  v <- sqrt(phi2 / min_rk)
+  return(v)
+}
+
+### Create an empty matrix to store the results
+vars <- names(cate)
+n <- length(vars)
+cramer_matrix <- matrix(NA, n, n, dimnames = list(vars, vars))
+
+### Calculate Cramér's V for every pair of variables
+for (i in 1:n) {
+  for (j in 1:n) {
+    cramer_matrix[i, j] <- cramers_v(cate[[i]], cate[[j]])
+  }
+}
+
+### Replace diagonals with 0 for better visualization
+diag(cramer_matrix) <- 0
+
+melted_cramer_matrix <- melt(cramer_matrix)
+
+ggplot(melted_cramer_matrix, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0.5, limit = c(0,1), space = "Lab", name="Cramér's V") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+        axis.title = element_blank()) +
+  labs(fill = "Cramér's\nV")
+# Remove the h_cohort
+#studydata = studydata |> select(-h_cohort)
+
+
+```
+
+
+
+## continuous variables
+
+```{r cont}
+cont = studydata|> select(where(is.numeric))
+
+summary_table <- cont %>%
+  summarise(across(where(is.numeric), list(
+    Mean = ~mean(.x, na.rm = TRUE),
+    SD = ~sd(.x, na.rm = TRUE),
+    Median = ~median(.x, na.rm = TRUE),
+    IQR = ~IQR(.x, na.rm = TRUE)
+  ))) |>
+  pivot_longer(
+    cols = everything(), 
+    names_to = c(".value", "Statistic"), 
+    names_pattern = "(.*)_(.*)"
+  ) 
+summary_table|> knitr::kable()
+
+# I specify the continuous variables' names in 'name' vector to add h_cohort in this dataset(I want to assess if there's difference between cohorts-especially the exposome)
+name_cont = colnames(cont)[-1]
+results = studydata |> select(h_cohort, any_of(name))
+
+results_summary = results %>%
+  group_by(h_cohort) %>%
+  summarize(across(where(is.numeric), 
+                   list(mean = ~mean(.x, na.rm = TRUE), 
+                        std = ~sd(.x, na.rm = TRUE)))) 
+
+# Conduct anova test for each variable in 'cont' across cohorts
+
+
+  
+## Correlation
+## Calculate correlation matrix
+cor_matrix <- cor(cont, use = "complete.obs")
+
+### Replace diagonals with 0 for better visualization
+diag(cor_matrix) <- 0
+
+
+
+# Melt the correlation matrix
+melted_cor_matrix <- melt(cor_matrix)
+
+# Plotting
+ggplot(melted_cor_matrix, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Pearson\nCorrelation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 12, hjust = 1),
+        axis.text.y = element_text(size = 12)) +
+  coord_fixed() +
+  labs(x = '', y = '', title = 'Correlation Matrix Heatmap')
+
+```
+
+*  Factor variables are summarized in frequency tables. Their correlations were also measured by Cramér's V values and visualized through heatmaps. Since the heatmap of Cramer's Value indicated a strong correlation between h_cohort[Cohort of inclusion (1 to 6)] and legume h_legume_preg_Ter[comsumption during pregnancy (times/week)], I removed the 'h_cohort'. Continuous variables are summerized in a large table with mean, std, median and iqr indicating their central tendency and spread.Their correlations were also measured by Pearson correlation mmatrix and visualized through a heatmap. The heatmap, as shown above is hard to read, I think a better alternative is to cluster the exposome... but I will first conduct a ExWAS analysis(with tailored exposome), f there's sufficient time, I might try k-mean clustering...
+
+
+
+```{r}
+# merge three datasets together
+studydata = merge(pre_exp,phenotype,by="ID") |> merge(covariates, by="ID")
+```
+
+
+# Implement Elastic Net Algorithm 
+
+```{r partition}
+#Partition data for use in demonstration
+set.seed(123)
+train.indices<-createDataPartition(y=studydata$e3_bw,p=0.7,list=FALSE)
+train.data<-studydata[train.indices, ]
+test.data<-studydata[-train.indices, ]
+```
+
+# ExWAS Analysis
+
+```{r ExWAS}
+
+
+results <- list()
+for (exposure in name) {
+    formula <- as.formula(paste("e3_bw ~", exposure))
+  
+  # Fit the model using the dynamically constructed formula
+  model <- glm(formula, data = studydata, family = "gaussian")  
+  
+  # Store the model's summary in the results list
+  results[[exposure]] <- summary(model)
+}
+
+
+```
+# 
+
