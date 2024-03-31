@@ -105,8 +105,6 @@ ggplot(melted_cramer_matrix, aes(Var1, Var2, fill = value)) +
 
 ```
 
-
-
 ## continuous variables
 
 ```{r cont}
@@ -166,7 +164,13 @@ ggplot(melted_cor_matrix, aes(Var1, Var2, fill = value)) +
 
 ```
 
-*  Factor variables are summarized in frequency tables. Their correlations were also measured by Cramér's V values and visualized through heatmaps. Since the heatmap of Cramer's Value indicated a strong correlation between h_cohort[Cohort of inclusion (1 to 6)] and legume h_legume_preg_Ter[comsumption during pregnancy (times/week)], I removed the 'h_cohort'. Continuous variables are summerized in a large table with mean, std, median and iqr indicating their central tendency and spread.Their correlations were also measured by Pearson correlation mmatrix and visualized through a heatmap. The heatmap, as shown above is hard to read, I think a better alternative is to cluster the exposome... but I will first conduct a ExWAS analysis(with tailored exposome), f there's sufficient time, I might try k-mean clustering...
+EDA: Since this dataset is a combine data from 6 cohorts,
+1. Population characteristics by cohorts
+2. Correlation between exposures(overall and within cohort correlation)
+3. PCA to reduce dimensionality(meet one of the requirement of constructing a new variable using an unsupervised analysis in option 3-I will ask professor if PCA is considered as creating a new variable; if not, we can also use clustering in the analysis procedure)
+
+pre-processing of exposome(standardizing)
+
 
 
 
@@ -186,6 +190,9 @@ train.data<-studydata[train.indices, ]
 test.data<-studydata[-train.indices, ]
 ```
 
+
+# Implement Random Forest(or other...)
+
 # ExWAS Analysis
 
 ```{r ExWAS}
@@ -204,5 +211,8 @@ for (exposure in name) {
 
 
 ```
-# 
+
+1. Adjusted association between the exposome and birthweight
+2. volcano plots for visualization
+
 
