@@ -20,7 +20,7 @@ My research question is to generate a hypothesis of which factors among a wide r
 
 # Load .Rdata file and Data Preparation
 
-```{r data preparation, echo=FALSE}
+```{r data preparation, warning=FALSE, message=FALSE}
 # Load data using path of where file is stored
 load("exposome.RData")
 
@@ -31,36 +31,104 @@ pre = codebook |> filter(period == "Pregnancy")
 name = rownames(pre)
 pre_exp = exposome |> select(ID,any_of(name))
 
-#Strip off ID Variable
-studydata$ID<-NULL
-
-# summary statistics for all variables
-skimr::skim(studydata)# no missing 
-
-# no duplicate
-studydata <- unique(studydata) # num of obs not changed, no duplicate
-
-# merge three datasets together
-studydata = merge(pre_exp,phenotype,by="ID") |> merge(covariates, by="ID")
 
 ```
 
-* There's no missing and duplicate in this dataset. All variables were correctly classified as numeric or factor.In the current analysis we included 87 environmental exposure variables 13 covariates for the pregnancy period and 6 phenotypes were kept although I will only use birthweight(e3_bw) as my outcome. 
-
 # Data Exploration
 
-## Covariates
+ 
+1. Since this dataset is a combine data from 6 cohorts, I would explore population characteristics(covariates) and outcomes(phenotypes) by cohorts.
+
+2. Correlation between exposures
+
+## 1. Covariates and phenotypes
+```{r covariates}
+cov_phe = inner_join(covariates, phenotype, by = "ID")
+```
+
+### categorical variables
+
+```{r cate_cov_phe, warning=FALSE, message=FALSE}
+cate_cov_phe = cov_phe |> select(where(is.factor))
+
+# Frequency table
+frequency_tables_cov_phe <- cate_cov_phe %>% map(~ as.data.frame(table(.x)))
+frequency_tables_cov_phe |>knitr::kable()# name of variables in these freq tables are displayed in the plot below
+
+# Difference by cohort
+cate_cov_phe_summ = cate_cov_phe %>%
+  pivot_longer(cols = -h_cohort, names_to = "covariate", values_to = "value") %>%
+  group_by(h_cohort, covariate,value) %>%
+  summarize(n = n(), .groups = 'drop') %>%
+  ungroup() 
+
+cate_cov_phe_summ %>%
+  ggplot(aes(x = h_cohort, y = n, color = value)) +
+  geom_point() +
+  geom_smooth(aes(group=value), method = "loess", se = FALSE) + 
+  facet_grid(. ~ covariate) +
+  theme_minimal() +  # For a cleaner look
+  labs(x = "Cohort", y = "Count", title = "Summary by Cohort and Covariate") 
 
 
 
-## Exposome(pre exp)
-## categorical variables
 
-```{r cate, warning=FALSE, message=FALSE}
-cate = studydata |> select(where(is.factor))
-frequency_tables <- cate %>% map(~ as.data.frame(table(.x), .id = "Variable"))
-frequency_tables |>knitr::kable()
 
+```
+
+### continuous variables
+
+```{r cont_cov_phe}
+
+cont_cov_phe = cov_phe|> select(where(is.numeric))
+
+summary_table_cov_phe <- cont_cov_phe %>%
+  summarise(across(where(is.numeric), list(
+    Mean = ~mean(.x, na.rm = TRUE),
+    SD = ~sd(.x, na.rm = TRUE),
+    Median = ~median(.x, na.rm = TRUE),
+    IQR = ~IQR(.x, na.rm = TRUE)
+  ))) |>
+  pivot_longer(
+    cols = everything(), 
+    names_to = c(".value", "Statistic"), 
+    names_pattern = "(.*)_(.*)"
+  ) 
+summary_table_cov_phe|> knitr::kable()
+
+# I specify the continuous variables' names in 'name' vector to add h_cohort in this dataset(I want to assess if there's difference between cohorts-especially the exposome)
+name_cont_cov_phe = colnames(cont_cov_phe)[-1]
+results_cov_phe = cov_phe |> select(h_cohort, any_of(name_cont_cov_phe))
+
+results_summary_cov_phe = results_cov_phe %>%
+  group_by(h_cohort) %>%
+  summarize(across(where(is.numeric), 
+                   list(mean = ~mean(.x, na.rm = TRUE), 
+                        std = ~sd(.x, na.rm = TRUE)))) 
+
+# Since birthweight is too large(also my outcome), I displayed it separately.
+results_cov_phe |> ggplot(aes(x=h_cohort, y=e3_bw)) + geom_boxplot() +
+  labs(x = "Cohort", y = "Birthweight(g)", title = "Birthweight of children by Cohort") 
+
+results_cov_phe_nobw = results_cov_phe |> select(-e3_bw)
+
+# difference across cohorts
+results_melted_cov_phe = melt(results_cov_phe_nobw)
+results_melted_cov_phe |>
+  ggplot(aes(x=h_cohort, y=value, fill=variable)) + geom_boxplot() + facet_wrap(~variable)+
+  labs(x = "Cohort", y = "Covariates and phenotypes", title = "Covariates and phenotypes by Cohort") 
+  
+
+
+```
+
+## 2.Exposome(pre exp)
+
+### Categorical
+
+```{r cate_exp, warning=FALSE, message=FALSE}
+
+cate_exp = pre_exp |> select(where(is.factor))
 ## Correlations
 ### Function to calculate Cramér's V
 cramers_v <- function(x, y) {
@@ -76,14 +144,14 @@ cramers_v <- function(x, y) {
 }
 
 ### Create an empty matrix to store the results
-vars <- names(cate)
+vars <- names(cate_exp)
 n <- length(vars)
 cramer_matrix <- matrix(NA, n, n, dimnames = list(vars, vars))
 
 ### Calculate Cramér's V for every pair of variables
 for (i in 1:n) {
   for (j in 1:n) {
-    cramer_matrix[i, j] <- cramers_v(cate[[i]], cate[[j]])
+    cramer_matrix[i, j] <- cramers_v(cate_exp[[i]], cate_exp[[j]])
   }
 }
 
@@ -99,48 +167,17 @@ ggplot(melted_cramer_matrix, aes(Var1, Var2, fill = value)) +
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
         axis.title = element_blank()) +
   labs(fill = "Cramér's\nV")
-# Remove the h_cohort
-#studydata = studydata |> select(-h_cohort)
-
-
 ```
 
-## continuous variables
 
-```{r cont}
-cont = studydata|> select(where(is.numeric))
+### Categorical
 
-summary_table <- cont %>%
-  summarise(across(where(is.numeric), list(
-    Mean = ~mean(.x, na.rm = TRUE),
-    SD = ~sd(.x, na.rm = TRUE),
-    Median = ~median(.x, na.rm = TRUE),
-    IQR = ~IQR(.x, na.rm = TRUE)
-  ))) |>
-  pivot_longer(
-    cols = everything(), 
-    names_to = c(".value", "Statistic"), 
-    names_pattern = "(.*)_(.*)"
-  ) 
-summary_table|> knitr::kable()
+```{r cont_exp, warinng=FALSE, message=FALSE}
+cont_exp = pre_exp |> select(where(is.numeric)) |> select(-ID)
 
-# I specify the continuous variables' names in 'name' vector to add h_cohort in this dataset(I want to assess if there's difference between cohorts-especially the exposome)
-name_cont = colnames(cont)[-1]
-results = studydata |> select(h_cohort, any_of(name))
-
-results_summary = results %>%
-  group_by(h_cohort) %>%
-  summarize(across(where(is.numeric), 
-                   list(mean = ~mean(.x, na.rm = TRUE), 
-                        std = ~sd(.x, na.rm = TRUE)))) 
-
-# Conduct anova test for each variable in 'cont' across cohorts
-
-
-  
 ## Correlation
 ## Calculate correlation matrix
-cor_matrix <- cor(cont, use = "complete.obs")
+cor_matrix <- cor(cont_exp, use = "complete.obs")
 
 ### Replace diagonals with 0 for better visualization
 diag(cor_matrix) <- 0
@@ -161,23 +198,24 @@ ggplot(melted_cor_matrix, aes(Var1, Var2, fill = value)) +
         axis.text.y = element_text(size = 12)) +
   coord_fixed() +
   labs(x = '', y = '', title = 'Correlation Matrix Heatmap')
-
 ```
 
-EDA: Since this dataset is a combine data from 6 cohorts,
-1. Population characteristics by cohorts
-2. Correlation between exposures(overall and within cohort correlation)
-3. PCA to reduce dimensionality(meet one of the requirement of constructing a new variable using an unsupervised analysis in option 3-I will ask professor if PCA is considered as creating a new variable; if not, we can also use clustering in the analysis procedure)
-
-pre-processing of exposome(standardizing)
-
-
-
-
-```{r}
+## Merge datasets
+```{r final_dataset}
 # merge three datasets together
-studydata = merge(pre_exp,phenotype,by="ID") |> merge(covariates, by="ID")
+
+outcome = phenotype |> select(ID, e3_bw)
+studydata = merge(pre_exp,outcome,by="ID") |> merge(covariates, by="ID") |>
+  select(-c(hs_c_weight_None, hs_c_height_None, hs_child_age_None))
+
+skimr::skim(studydata)
+
 ```
+
+* There's 6 phenotype in 'phenotype' dataset, 13 covariates in 'covariates' dataset and 88 prenatal exposures in 'pre_exp' dataset, which I would focus on. According to my research question, I would keep only one phenotype *e3_bw*(birthweight) as my outcome. Also, since this study don't focus on postnatal period, I would remove *hs_c_height_None*(Height of the child at 6-11 years old (m)), *hs_c_weight_None*(Weight of the child at 6-11 years old (kg)),*hs_child_age_None*(Child age at examination (years)) from my covariates list that I 
+would control for. They were the only three variables in 'covariates' dataset that are highly correlated with each other. **In a nutshell, the final dataset 'studydata' had 1 identifier *ID*, 1 outcome *e3bw*, 10 covariates and 88 prenatal exposures.** There's no missing and duplicate in this dataset. All variables were correctly classified as numeric or factor. 
+
+* Some covariates and exposores are different across cohorts(I didn't do hypothesis testing, I just used visual inspection). We should assess the heterogenitity before we could pool the data from 6 cohots. But due to limited time, I just assumed that we can pool them together.
 
 
 # Implement Elastic Net Algorithm 
