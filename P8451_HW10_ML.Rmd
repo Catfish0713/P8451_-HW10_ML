@@ -202,10 +202,12 @@ ggplot(melted_cor_matrix, aes(Var1, Var2, fill = value)) +
 
 # Merge datasets
 ```{r final_dataset}
-# merge three datasets together
-
+# merge features together
+feature = merge(pre_exp,covariates,by="ID")
 outcome = phenotype |> select(ID, e3_bw)
-studydata = merge(pre_exp,outcome,by="ID") |> merge(covariates, by="ID") |>
+studydata = merge(feature,outcome,by="ID") 
+
+|>
   select(-c(hs_c_weight_None, hs_c_height_None, hs_child_age_None)) |>
   select(-ID)
 
@@ -217,6 +219,29 @@ skimr::skim(studydata)
 would control for. They were the only three variables in 'covariates' dataset that are highly correlated with each other. **In a nutshell, the final dataset 'studydata' had 1 identifier *ID*, 1 outcome *e3bw*, 10 covariates and 88 prenatal exposures.** There's no missing and duplicate in this dataset. All variables were correctly classified as numeric or factor. 
 
 * Some covariates and exposores are different across cohorts(I didn't do hypothesis testing, I just used visual inspection). We should assess the heterogenitity before we could pool the data from 6 cohots. But due to limited time, I just assumed that we can pool them together.
+
+# PCA to reduce dimensionality
+We reduced the dimensionality by conducting a separate PCA within each of the 19 pre-defined exposure groups, and retained only the first principal component for all of them. This way, we created a composite index variable (principal component scores) for each exposure group, and then averaged the scores by cohort to compare the levels.
+
+```{r}
+library(FactoMineR)
+library(factoextra)
+exp_groups = unique(codebook$family)
+exp_groups = exp_groups[-20]
+
+
+for (family in exp_group){
+  feature
+  # Assuming `data_group` is your dataframe for one exposure group
+  res.pca <- PCA(data_group, scale.unit = TRUE, ncp = 5, graph = FALSE)
+
+  # Extracting the first principal component scores
+  pc1_scores <- res.pca$ind$coord[, 1]
+}
+
+
+```
+
 
 
 # Implement Elastic Net Algorithm 
