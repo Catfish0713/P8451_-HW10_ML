@@ -200,13 +200,14 @@ ggplot(melted_cor_matrix, aes(Var1, Var2, fill = value)) +
   labs(x = '', y = '', title = 'Correlation Matrix Heatmap')
 ```
 
-## Merge datasets
+# Merge datasets
 ```{r final_dataset}
 # merge three datasets together
 
 outcome = phenotype |> select(ID, e3_bw)
 studydata = merge(pre_exp,outcome,by="ID") |> merge(covariates, by="ID") |>
-  select(-c(hs_c_weight_None, hs_c_height_None, hs_child_age_None))
+  select(-c(hs_c_weight_None, hs_c_height_None, hs_child_age_None)) |>
+  select(-ID)
 
 skimr::skim(studydata)
 
@@ -229,28 +230,78 @@ test.data<-studydata[-train.indices, ]
 ```
 
 
-# Implement Random Forest(or other...)
+```{r}
+set.seed(123)
+control = trainControl(method = "repeatedcv", 
+                      number = 10,
+                      repeats = 5,
+                      selectionFunction = "best")
 
-# ExWAS Analysis
 
-```{r ExWAS}
+# Model building
+en.model<- train(
+                  e3_bw ~., 
+                  data = train.data, 
+                  method = "glmnet",
+                  trControl =  control, 
+                  preProc = c("center", "scale"),
+                  tuneGrid = expand.grid(alpha = seq(0, 1, length = 20), 
+                                         lambda = exp(seq(3, -3, length = 100)))
+                )
+# I chose tuneGrid here, because this command can be used for different scenarios,but using TuneLength, I have to look at all results and see which k is the best. 
+
+#Print the values of alpha and lambda that gave best prediction
+en.model$bestTune
 
 
-results <- list()
-for (exposure in name) {
-    formula <- as.formula(paste("e3_bw ~", exposure))
-  
-  # Fit the model using the dynamically constructed formula
-  model <- glm(formula, data = studydata, family = "gaussian")  
-  
-  # Store the model's summary in the results list
-  results[[exposure]] <- summary(model)
-}
+# Model coefficients
+coef(en.model$finalModel, en.model$bestTune$lambda)
 
+resamp = en.model$resample
+
+
+# Predictions for models
+prediction = predict(en.model, test.data)
+
+# Evaluation
+RMSE(prediction, test.data$e3_bw)
+R2(prediction, test.data$e3_bw)
 
 ```
 
-1. Adjusted association between the exposome and birthweight
-2. volcano plots for visualization
+* Elastic Net Algorithm were applied to training dataset, with the best hyperparameter of alpha = 1,lambda ~ 13.14. This is a lasso model and can select features. Finally, only 34 variables are kept in the model. testing RMSE is `r RMSE(prediction, test.data$e3_bw)` and testing R2 is `r R2(prediction, test.data$e3_bw)`.
 
+# Interaction
+
+```{r interaction, message=FALSE, warning=FALSE}
+set.seed(123)
+
+model_interaction <- train(
+                  e3_bw ~ (h_pm10_ratio_preg_None+h_dairy_preg_Ter+h_fastfood_preg_Ter+h_folic_t1_None+h_pamod_t3_None+h_pavig_t3_None+h_veg_preg_Ter+hs_as_m_Log2+hs_cd_m_Log2+hs_cs_m_Log2+hs_cu_m_Log2+hs_tl_mdich_None+h_ndvi100_preg_None+hs_dep_madj_Log2+hs_dmtp_madj_Log2+hs_pbde47_madj_Log2+hs_pfna_m_Log2+hs_pfoa_m_Log2+hs_etpa_madj_Log2+hs_oxbe_madj_Log2+hs_oxbe_madj_Log2+hs_mibp_madj_Log2+e3_asmokcigd_p_None+hs_cotinine_mcat_None+h_trafnear_preg_pow1over3+h_bro_preg_Log+e3_sex_None+h_mbmi_None+hs_wgtgain_None+e3_gac_None+h_edumc_None+h_native_None+h_parity_None)^2, 
+                  data = train.data, preProcess=c("center", "scale"), 
+                  method = "glmnet",
+                  trControl = control,
+                  expand.grid(alpha = seq(0, 1, length = 20), 
+                                         lambda = exp(seq(3, -3, length = 100)))
+               )
+
+library(doParallel)
+registerDoParallel(cores = detectCores())
+
+#Print the values of alpha and lambda that gave best prediction
+model.3$bestTune
+
+#Examine model coefficients for variable importance
+coef(model.3$finalModel, model.3$bestTune$lambda)
+
+#Predict in test-set
+model.3.pred <- model.3 %>% 
+                predict(test.data)
+
+# Evaluation metrics and prediction performance
+data.frame(
+            RMSE = RMSE(model.3.pred, test.data$e3_bw),
+            Rsquare = R2(model.3.pred, test.data$e3_bw)
+          )
+```
 
