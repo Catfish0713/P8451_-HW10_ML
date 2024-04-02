@@ -2,7 +2,7 @@
 title: "P8451_HW10_ML"
 author: "Ruixi Li"
 date: "2024-03-26"
-output: html_document
+output: word_document
 ---
 
 ```{r library, include=FALSE}
@@ -205,9 +205,7 @@ ggplot(melted_cor_matrix, aes(Var1, Var2, fill = value)) +
 # merge features together
 feature = merge(pre_exp,covariates,by="ID")
 outcome = phenotype |> select(ID, e3_bw)
-studydata = merge(feature,outcome,by="ID") 
-
-|>
+studydata = merge(feature,outcome,by="ID") |>
   select(-c(hs_c_weight_None, hs_c_height_None, hs_child_age_None)) |>
   select(-ID)
 
@@ -220,27 +218,6 @@ would control for. They were the only three variables in 'covariates' dataset th
 
 * Some covariates and exposores are different across cohorts(I didn't do hypothesis testing, I just used visual inspection). We should assess the heterogenitity before we could pool the data from 6 cohots. But due to limited time, I just assumed that we can pool them together.
 
-# PCA to reduce dimensionality
-We reduced the dimensionality by conducting a separate PCA within each of the 19 pre-defined exposure groups, and retained only the first principal component for all of them. This way, we created a composite index variable (principal component scores) for each exposure group, and then averaged the scores by cohort to compare the levels.
-
-```{r}
-library(FactoMineR)
-library(factoextra)
-exp_groups = unique(codebook$family)
-exp_groups = exp_groups[-20]
-
-
-for (family in exp_group){
-  feature
-  # Assuming `data_group` is your dataframe for one exposure group
-  res.pca <- PCA(data_group, scale.unit = TRUE, ncp = 5, graph = FALSE)
-
-  # Extracting the first principal component scores
-  pc1_scores <- res.pca$ind$coord[, 1]
-}
-
-
-```
 
 
 
@@ -255,7 +232,7 @@ test.data<-studydata[-train.indices, ]
 ```
 
 
-```{r}
+```{r en}
 set.seed(123)
 control = trainControl(method = "repeatedcv", 
                       number = 10,
@@ -294,9 +271,15 @@ R2(prediction, test.data$e3_bw)
 
 ```
 
-* Elastic Net Algorithm were applied to training dataset, with the best hyperparameter of alpha = 1,lambda ~ 13.14. This is a lasso model and can select features. Finally, only 34 variables are kept in the model. testing RMSE is `r RMSE(prediction, test.data$e3_bw)` and testing R2 is `r R2(prediction, test.data$e3_bw)`.
+* Elastic Net Algorithm were applied to training dataset, with the best hyperparameter of $\alpha$ = 1,$\lambda$ $\approx$ 13.14. This is a lasso model and can select features. Finally, only 34 variables are kept in the model. testing RMSE is `r RMSE(prediction, test.data$e3_bw)` and testing R2 is `r R2(prediction, test.data$e3_bw)`.
 
-# Interaction
+
+
+# Optional: Interaction
+
+I used to try PCA to reduce the dimensionality, but it takes a long time to figure it out. I would rather pick 5 features from exposome that were kept in my EN.model and 1 feature I think might be a efect modifier based on my knowlege to explore the two-way interaction.
+
+
 
 ```{r interaction, message=FALSE, warning=FALSE}
 set.seed(123)
@@ -306,27 +289,28 @@ model_interaction <- train(
                   data = train.data, preProcess=c("center", "scale"), 
                   method = "glmnet",
                   trControl = control,
-                  expand.grid(alpha = seq(0, 1, length = 20), 
-                                         lambda = exp(seq(3, -3, length = 100)))
+                  expandLength=10
                )
 
-library(doParallel)
-registerDoParallel(cores = detectCores())
+
 
 #Print the values of alpha and lambda that gave best prediction
-model.3$bestTune
+model_interaction$bestTune
 
 #Examine model coefficients for variable importance
-coef(model.3$finalModel, model.3$bestTune$lambda)
+coef(model_interaction$finalModel, model_interaction$bestTune$lambda)
 
 #Predict in test-set
-model.3.pred <- model.3 %>% 
+model_interaction.pred <- model_interaction %>% 
                 predict(test.data)
 
 # Evaluation metrics and prediction performance
 data.frame(
-            RMSE = RMSE(model.3.pred, test.data$e3_bw),
-            Rsquare = R2(model.3.pred, test.data$e3_bw)
+            RMSE = RMSE(model_interaction.pred, test.data$e3_bw),
+            Rsquare = R2(model_interaction.pred, test.data$e3_bw)
           )
 ```
 
+
+* I don't know why if I use expand.grid to tune $\alpha$ and $\lambda$, there will be an error:Error in { : task 1 failed - "the condition has length > 1". So, I just use expandLength=10. 
+* The RMSE and R2 for interaction model indicated that the model with automated interaction didn't have a better performance compared with the one without interaction.
